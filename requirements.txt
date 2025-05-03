@@ -1,0 +1,10 @@
+langchain
+openai
+python-dotenv
+streamlit
+pypdf
+python-docx
+unstructured[docx]
+sentence-transformers
+faiss-cpu
+pyperclip
