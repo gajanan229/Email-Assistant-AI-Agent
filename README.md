@@ -25,8 +25,8 @@ A Streamlit web application that leverages Retrieval-Augmented Generation (RAG) 
     *   **Embeddings:** `SentenceTransformerEmbeddings` (from `langchain-community`)
     *   **Vector Stores:** `FAISS` (from `langchain-community`)
     *   **Retrievers:** FAISS `as_retriever`
-    *   **LLMs:** `OpenAI` (from `langchain-openai`)
-    *   **Prompts:** `PromptTemplate`
+    *   **LLMs:** `ChatOpenAI` (from `langchain-openai`, using `gpt-4o` model)
+    *   **Prompts:** `ChatPromptTemplate`, `SystemMessagePromptTemplate`, `HumanMessagePromptTemplate`
     *   **Output Parsers:** `StructuredOutputParser`
 *   **Environment Variables:** `python-dotenv`
 *   **Clipboard:** `pyperclip`
@@ -105,4 +105,5 @@ Email-Assistant-AI-Agent/
 *   **`app.py`**: Handles the user interface elements, state management, and orchestrates calls to the backend logic.
 *   **`src/doc_processor.py`**: Contains functions responsible for loading, parsing, chunking documents, and creating the vector store retriever.
 *   **`src/agent_logic.py`**: Contains functions for configuring the LLM, managing prompts, performing RAG generation, extracting skills, and parsing outputs.
+```
 

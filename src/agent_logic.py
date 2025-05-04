@@ -2,10 +2,17 @@ import streamlit as st # Only needed for the cache decorator
 import os
 import re
 from dotenv import load_dotenv
-from langchain.chains import LLMChain
-from langchain.prompts import PromptTemplate
-from langchain_openai import OpenAI
-from langchain.schema import Document
+# Removed: from langchain.chains import LLMChain
+from langchain.prompts import (
+    PromptTemplate, # Still used for basic prompt if kept
+    ChatPromptTemplate,
+    SystemMessagePromptTemplate,
+    HumanMessagePromptTemplate
+)
+# Replaced OpenAI with ChatOpenAI
+from langchain_openai import ChatOpenAI
+from langchain.schema import Document, SystemMessage, HumanMessage
+from langchain.schema.messages import AIMessage # Import AIMessage for response handling
 from langchain.output_parsers import StructuredOutputParser, ResponseSchema
 from typing import List, Optional, Tuple
 
@@ -30,26 +37,36 @@ def load_api_key() -> Optional[str]:
     return api_key
 
 @st.cache_resource # Keep cache for expensive LLM object
-def configure_llm(api_key: str) -> Optional[OpenAI]:
-    """Configures and returns the Langchain LLM, cached for efficiency.
+def configure_llm(api_key: str) -> Optional[ChatOpenAI]:
+    """Configures and returns the Langchain Chat LLM, cached for efficiency.
 
     Args:
         api_key (str): The OpenAI API key.
 
     Returns:
-        Optional[OpenAI]: The configured LLM instance or None if configuration fails.
+        Optional[ChatOpenAI]: The configured ChatOpenAI instance or None if configuration fails.
     """
     try:
-        # Set a higher max_tokens limit to prevent abrupt output cutoff.
-        llm = OpenAI(temperature=0.7, openai_api_key=api_key, max_tokens=1024)
-        print("INFO: LLM configured successfully.")
+        # Use ChatOpenAI with the specified model
+        llm = ChatOpenAI(
+            model="gpt-4o",
+            temperature=0.7,
+            openai_api_key=api_key,
+            max_tokens=1024 # Keep max_tokens, useful for controlling output length budget
+        )
+        print("INFO: ChatOpenAI LLM (gpt-4o) configured successfully.")
         return llm
     except Exception as e:
-        print(f"ERROR: Error configuring LLM: {e}")
+        print(f"ERROR: Error configuring ChatOpenAI LLM: {e}")
         return None
+
+# Note: create_input_prompt_template and create_input_llm_chain are less relevant
+# now that the primary path uses ChatOpenAI and RAG. They are kept here
+# but would need similar refactoring if used actively.
 
 def create_input_prompt_template() -> PromptTemplate:
     """Creates a basic prompt template for email generation without RAG.
+       (Legacy function, may need refactoring to ChatPromptTemplate if used).
 
     Returns:
         PromptTemplate: The Langchain prompt template instance.
@@ -64,51 +81,53 @@ def create_input_prompt_template() -> PromptTemplate:
     Additional Notes/Instructions from User: {notes}
 
     **Instructions:**
-    1.  Start with a professional salutation (e.g., "Dear Hiring Manager,").
-    2.  **Craft an Engaging Opening:** Immediately after the salutation, write a compelling opening sentence or two. *Avoid generic phrases* like "I am writing to apply..." or "I am excited to apply...". Instead, try one of these approaches:
-        *   Directly state your enthusiasm for this specific {position} at {company}, perhaps mentioning *why* it excites you based on the role title or company name itself (be creative!).
-        *   If mentioned in the User Notes, lead with a *hook* related to a key skill or experience highly relevant to the {position}.
-        *   Clearly state the role you're applying for within this engaging opening, but weave it in naturally.
-    3.  **Connect to User Notes:** Weave in specific points, projects, or skills mentioned in the 'Additional Notes' into the body of the email, demonstrating their relevance to the {position}.
-    4.  **Express Value:** Briefly explain *why* you believe you are a strong candidate, connecting your general profile (implied by the request) to the likely needs of the role.
-    5.  **Maintain Tone:** Ensure the entire email reflects the specified {tone}.
-    6.  **Closing:** End with a professional closing (e.g., "Sincerely,"), followed by "[Your Name]".
+    1.  Start with a professional salutation.
+    2.  Clearly state the position being applied for and where it was seen (if mentioned in notes).
+    3.  Briefly express enthusiasm for the role and company.
+    4.  Mention any specific points from the 'Additional Notes'.
+    5.  End with a professional closing and placeholder for the user's name.
+    6.  Maintain the specified {tone}.
 
     Generated Email:
     """
     prompt = PromptTemplate(template=template, input_variables=["position", "company", "tone", "notes"])
     return prompt
 
-# This might not need caching if only used as a fallback.
-# @st.cache_resource
-def create_input_llm_chain(_llm: OpenAI, _prompt_template: PromptTemplate) -> Optional[LLMChain]:
-    """Creates a basic Langchain LLMChain.
+# @st.cache_resource # Caching might not be needed if not primary path
+def create_input_llm_chain(_llm: ChatOpenAI, _prompt_template: PromptTemplate) -> Optional[any]:
+    """Creates a basic Langchain chain (needs update for Chat models).
+       (Legacy function, LLMChain is deprecated, consider LCEL: prompt | llm).
 
     Args:
-        _llm (OpenAI): The configured LLM instance.
+        _llm (ChatOpenAI): The configured LLM instance.
         _prompt_template (PromptTemplate): The prompt template to use.
 
     Returns:
-        Optional[LLMChain]: The created chain or None if inputs are invalid.
+        Optional[any]: The created chain or None if inputs are invalid.
+                       Return type 'any' as LLMChain is deprecated.
     """
     if _llm and _prompt_template:
-        # Note: LLMChain is deprecated, consider replacing with `prompt | llm` RunnableSequence
-        print("INFO: Creating basic LLM Chain (deprecated).")
-        return LLMChain(llm=_llm, prompt=_prompt_template)
+        print("INFO: Creating basic LLM Chain (deprecated, consider LCEL).")
+        # from langchain.chains import LLMChain # Import locally if needed
+        # return LLMChain(llm=_llm, prompt=_prompt_template)
+        # Using LCEL (LangChain Expression Language) is preferred:
+        # return _prompt_template | _llm
+        print("WARNING: LLMChain is deprecated. Returning None for basic chain.")
+        return None # Avoid using deprecated LLMChain
     print("ERROR: Could not create basic LLM Chain due to invalid inputs.")
     return None
 
 
 # --- RAG Prompt Template & Parser ---
 
-def create_rag_prompt_template_with_parser() -> Optional[Tuple[PromptTemplate, StructuredOutputParser]]:
-    """Creates the RAG prompt template and a structured output parser.
+def create_rag_prompt_template_with_parser() -> Optional[Tuple[ChatPromptTemplate, StructuredOutputParser]]:
+    """Creates the RAG ChatPromptTemplate and a structured output parser.
 
     Defines the desired JSON output structure (subject, body) and includes
-    instructions for the LLM within the prompt.
+    instructions for the LLM within the prompt using System and Human messages.
 
     Returns:
-        Optional[Tuple[PromptTemplate, StructuredOutputParser]]: The prompt template and
+        Optional[Tuple[ChatPromptTemplate, StructuredOutputParser]]: The chat prompt template and
             the configured output parser, or None on failure.
     """
     try:
@@ -119,63 +138,55 @@ def create_rag_prompt_template_with_parser() -> Optional[Tuple[PromptTemplate, S
         output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
         format_instructions = output_parser.get_format_instructions()
 
-        template = """
-        You are an expert AI assistant specializing in crafting **compelling, narrative-style** job application emails (Subject and Body). Your goal is to connect with the reader on a deeper level, beyond just listing qualifications.
-        Your tone should be: {tone}.
-        The user wants to apply for the position of: {position} at {company}.
-        User's specific notes/instructions: {notes}
+        # System Message: Define the AI's role and overall goal.
+        system_template = """You are an expert AI assistant specializing in crafting compelling, narrative-style job application emails. Your goal is to help the user create a personalized email based on their resume, the job description, and specific instructions."""
+        system_message_prompt = SystemMessagePromptTemplate.from_template(system_template)
 
-        Use the following relevant context extracted from the user's RESUME:
+        # Human Message: Provide context, specific instructions, and desired output format.
+        human_template = """Please draft a job application email with the following details:
+        - Tone: {tone}
+        - Position Applying For: {position}
+        - Company Name: {company}
+        - User's Additional Notes: {notes}
+
+        Use the following context from the user's RESUME:
         --- BEGIN RESUME CONTEXT ---
         {context_resume}
         --- END RESUME CONTEXT ---
 
-        Use the following relevant context extracted from the JOB DESCRIPTION:
+        Use the following context from the JOB DESCRIPTION:
         --- BEGIN JOB DESCRIPTION CONTEXT ---
         {context_jd}
         --- END JOB DESCRIPTION CONTEXT ---
 
-        **Instructions for Generating the Email Body:**
-
-        1.  **Craft an Opening Narrative (1-2 Paragraphs):**
-            *   **Identify the Core Theme:** Analyze the **Job Description Context** to identify the company's core mission, a significant challenge they address, a key innovation they are driving, or the broader impact of the work.
-            *   **Establish Personal Resonance:** Begin the email body (immediately after the salutation) by reflecting on this core theme. Explain *why* this mission, challenge, or impact resonates deeply with *your* (the user's implied) values, passion, philosophy, or long-term goals. Draw inspiration from the **Resume Context** or **User Notes** if they support this connection. Make it sound genuine and specific to **{company}**.
-            *   **Connect Skills Thematically:** Briefly mention 1-2 high-level skill areas or experiences (from **Resume Context**) not as a list, but as tools or passions relevant to contributing to this core theme. Example: "My passion for [Skill Area from Resume] aligns perfectly with [Company]'s drive to solve [Problem from JD Context]."
-            *   **CRITICAL:** **DO NOT explicitly state "I am applying for the {position}" or use phrases like "I am writing to apply..." or "I was excited to see the opening..." in this initial narrative section.** The purpose is to establish connection and interest first.
-
-        2.  **Transition and Introduce the Role:**
-            *   After establishing the thematic connection, create a smooth transition.
-            *   *Then*, naturally introduce the specific **{position}** role as the concrete opportunity you are pursuing to *actively contribute* to the mission/challenge you just discussed. Frame it as the logical next step given your resonance with the company's goals. Example: "It's with this shared vision in mind that I am particularly drawn to the **{position}** opportunity at **{company}**."
-
-        3.  **Provide Supporting Evidence:**
-            *   Select 1-2 specific examples, projects, or quantifiable achievements from the **Resume Context** that directly support your ability to succeed in the **{position}** and contribute to the goals mentioned in the **Job Description Context**. Link them clearly to the requirements.
-
-        4.  **Incorporate User Notes:**
-            *   Thoughtfully integrate any specific points from the user's '{notes}' where they best enhance the narrative or provide crucial details.
-
-        5.  **Maintain Tone and Professionalism:**
-            *   Ensure the entire email body consistently reflects the specified {tone} while remaining professional.
-
-        6.  **Closing:**
-            *   Conclude with a forward-looking statement expressing strong enthusiasm for the opportunity and the next steps in the process. Reiterate your interest in contributing to **{company}**.
-            *   Use a professional closing (e.g., "Sincerely,") followed by the placeholder "[Your Name]".
-
-        **Instructions for Generating the Subject Line:**
-        *   Create a concise and compelling subject line. Include the **{position}** title and **{company}**. Consider adding your name or a *very brief* highlight. Examples: "Application: {position} - {company}", "Enthusiastic Application for {position} at {company} - [Your Name]", "{position} at {company} - Interest in [Key Area from JD/Notes]".
+        **Instructions:**
+        1. Based *only* on the provided context (Resume and Job Description) and the user's inputs (position, company, tone, notes), draft a compelling email Subject and Body.
+        2. Highlight the alignment between the user's skills/experience (from Resume Context) and the key requirements/responsibilities (from Job Description Context). Be specific where possible.
+        3. Naturally incorporate any relevant points from the user's 'notes'.
+        4. Maintain the specified {tone} throughout the email body.
+        5. The body should start with a professional salutation (e.g., "Dear Hiring Team," or specific name if provided in notes) and conclude with a professional closing statement and "[Your Name]".
 
         **Output Format:**
-        Provide the output ONLY in the following JSON format, ensuring the 'body' contains only the text after the salutation and before the final closing/name:
+        Provide the output ONLY in the following JSON format:
         {format_instructions}
         """
-        prompt = PromptTemplate(
-            template=template,
-            input_variables=["tone", "position", "company", "notes", "context_resume", "context_jd"],
-            partial_variables={"format_instructions": format_instructions}
+        human_message_prompt = HumanMessagePromptTemplate.from_template(human_template)
+
+        # Create the ChatPromptTemplate
+        chat_prompt = ChatPromptTemplate.from_messages(
+            [system_message_prompt, human_message_prompt]
         )
-        print("INFO: RAG prompt template and parser created successfully.")
-        return prompt, output_parser
+
+        # Update input variables (excluding partials)
+        chat_prompt.input_variables = ["tone", "position", "company", "notes", "context_resume", "context_jd"]
+        # Add partial variables
+        chat_prompt.partial_variables = {"format_instructions": format_instructions}
+
+
+        print("INFO: RAG ChatPromptTemplate and parser created successfully.")
+        return chat_prompt, output_parser
     except Exception as e:
-        print(f"ERROR: Failed to create RAG prompt template or parser: {e}")
+        print(f"ERROR: Failed to create RAG ChatPromptTemplate or parser: {e}")
         return None
 
 # --- Helper Function for Formatting Retrieved Docs ---
@@ -198,12 +209,12 @@ def format_retrieved_docs(docs: List[Document]) -> str:
 
 # --- Key Skill Extraction Function ---
 
-def extract_key_skills(jd_full_text: str, llm: OpenAI) -> Optional[str]:
-    """Extracts key skills from the job description text using the LLM.
+def extract_key_skills(jd_full_text: str, llm: ChatOpenAI) -> Optional[str]:
+    """Extracts key skills from the job description text using the Chat LLM.
 
     Args:
         jd_full_text (str): The full text content of the job description.
-        llm (OpenAI): The configured LLM instance.
+        llm (ChatOpenAI): The configured ChatOpenAI instance.
 
     Returns:
         Optional[str]: A string containing the extracted skills (likely a list),
@@ -216,6 +227,7 @@ def extract_key_skills(jd_full_text: str, llm: OpenAI) -> Optional[str]:
         print("ERROR: LLM not available, cannot extract skills.")
         return None
 
+    # Construct the prompt text as before
     skill_prompt_text = f"""
     Based on the following job description text, please list the top 5-7 most important skills, qualifications, or requirements mentioned.
     Present them as a concise bulleted or numbered list.
@@ -227,13 +239,25 @@ def extract_key_skills(jd_full_text: str, llm: OpenAI) -> Optional[str]:
 
     Key Skills/Requirements:
     """
+    # Wrap the prompt text in a HumanMessage for the Chat model
+    skill_messages = [HumanMessage(content=skill_prompt_text)]
+
     try:
-        print("DEBUG: Calling LLM for skill extraction...")
-        response = llm.invoke(skill_prompt_text)
-        print("DEBUG: Skill extraction response received.")
-        return response.strip() if response else "Could not extract skills."
+        print("DEBUG: Calling Chat LLM for skill extraction...")
+        # Invoke the Chat LLM with the message list
+        response_message = llm.invoke(skill_messages)
+
+        # Extract content from the AIMessage response
+        if isinstance(response_message, AIMessage):
+            response_content = response_message.content
+            print("DEBUG: Skill extraction response received.")
+            return response_content.strip() if response_content else "Could not extract skills."
+        else:
+            print(f"ERROR: Unexpected response type from LLM during skill extraction: {type(response_message)}")
+            return None
+
     except Exception as e:
-        print(f"ERROR: Error extracting skills via LLM: {e}")
+        print(f"ERROR: Error extracting skills via Chat LLM: {e}")
         return None
 
 # --- Output Parsing Functions ---
@@ -242,7 +266,7 @@ def parse_subject_body_fallback(response: str) -> Tuple[str, str]:
     """Fallback parser using regex to find Subject: and Body: if structured parsing fails.
 
     Args:
-        response (str): The raw string response from the LLM.
+        response (str): The raw string response content from the LLM.
 
     Returns:
         Tuple[str, str]: The extracted subject and body strings. Defaults will be
@@ -295,11 +319,11 @@ def parse_subject_body_fallback(response: str) -> Tuple[str, str]:
     return subject, body
 
 
-def parse_llm_output(response: str, parser: StructuredOutputParser) -> Tuple[str, str]:
-   """Parses the LLM output using the structured parser with a regex fallback.
+def parse_llm_output(response_content: str, parser: StructuredOutputParser) -> Tuple[str, str]:
+   """Parses the LLM string output content using the structured parser with a regex fallback.
 
    Args:
-        response (str): The raw string response from the LLM.
+        response_content (str): The raw string content from the LLM response.
         parser (StructuredOutputParser): The Langchain parser instance.
 
    Returns:
@@ -307,24 +331,26 @@ def parse_llm_output(response: str, parser: StructuredOutputParser) -> Tuple[str
    """
    try:
        print("DEBUG: Attempting structured parsing...")
-       parsed_output = parser.parse(response)
+       # Parse the string content
+       parsed_output = parser.parse(response_content)
        subject = parsed_output.get('subject', 'Subject Not Found (Parsed)')
        body = parsed_output.get('body', 'Body Not Found (Parsed)')
        print("DEBUG: Structured parsing successful.")
        return subject, body
    except Exception as e:
        print(f"WARNING: Structured parsing failed: {e}. Using fallback regex parser.")
-       return parse_subject_body_fallback(response)
+       # Pass the original string content to the fallback
+       return parse_subject_body_fallback(response_content)
 
 
 # --- RAG Generation Function ---
 
-def generate_rag_email(llm: OpenAI, rag_prompt_template: PromptTemplate, output_parser: StructuredOutputParser, position: str, company: str, tone: str, notes: str, resume_retriever: VectorStoreRetriever, jd_retriever: VectorStoreRetriever) -> Tuple[Optional[str], Optional[str]]:
-    """Generates email using RAG: retrieves context, formats prompt, calls LLM, parses output.
+def generate_rag_email(llm: ChatOpenAI, rag_prompt_template: ChatPromptTemplate, output_parser: StructuredOutputParser, position: str, company: str, tone: str, notes: str, resume_retriever: VectorStoreRetriever, jd_retriever: VectorStoreRetriever) -> Tuple[Optional[str], Optional[str]]:
+    """Generates email using RAG with Chat LLM: retrieves context, formats prompt, calls LLM, parses output.
 
     Args:
-        llm (OpenAI): The configured LLM instance.
-        rag_prompt_template (PromptTemplate): The RAG-specific prompt template.
+        llm (ChatOpenAI): The configured ChatOpenAI instance.
+        rag_prompt_template (ChatPromptTemplate): The RAG-specific chat prompt template.
         output_parser (StructuredOutputParser): The parser for the LLM response.
         position (str): The job position title.
         company (str): The company name.
@@ -337,7 +363,7 @@ def generate_rag_email(llm: OpenAI, rag_prompt_template: PromptTemplate, output_
         Tuple[Optional[str], Optional[str]]: The generated subject and body strings,
                                              or (None, None) on failure.
     """
-    print("INFO: Starting RAG generation...")
+    print("INFO: Starting RAG generation with Chat LLM...")
 
     if not resume_retriever or not jd_retriever:
         print("ERROR: Cannot generate RAG email without both resume and JD retrievers.")
@@ -379,23 +405,30 @@ def generate_rag_email(llm: OpenAI, rag_prompt_template: PromptTemplate, output_
         # format_instructions are handled by partial_variables in the template
     }
 
-    # 5. Generate Email using LLM and RAG Prompt
+    # 5. Generate Email using Chat LLM and RAG Prompt
     try:
-        # Format the prompt string with all context and inputs.
-        final_prompt_string = rag_prompt_template.format(**input_data)
-        print("DEBUG: Sending final prompt to LLM...")
-        # Use .invoke() for the LLM call.
-        raw_response = llm.invoke(final_prompt_string)
-        print("DEBUG: Received raw response from LLM.")
-        # print(f"DEBUG Raw Response:\n{raw_response}\n") # Optional: Log raw response
+        # Format the ChatPromptTemplate into a list of messages
+        formatted_messages = rag_prompt_template.format_messages(**input_data)
+        print("DEBUG: Sending formatted messages to Chat LLM...")
+        # Invoke the Chat LLM with the formatted messages
+        raw_response_message = llm.invoke(formatted_messages)
+        print("DEBUG: Received raw response message from Chat LLM.")
 
-        # 6. Parse Output
-        subject, body = parse_llm_output(raw_response, output_parser)
-        print("INFO: RAG email generation and parsing complete.")
-        return subject, body
+        # Extract the string content from the AIMessage
+        if isinstance(raw_response_message, AIMessage):
+            raw_response_content = raw_response_message.content
+            # print(f"DEBUG Raw Response Content:\n{raw_response_content}\n") # Optional log
+
+            # 6. Parse Output content string
+            subject, body = parse_llm_output(raw_response_content, output_parser)
+            print("INFO: RAG email generation and parsing complete.")
+            return subject, body
+        else:
+             print(f"ERROR: Unexpected response type from LLM: {type(raw_response_message)}")
+             return None, None
 
     except Exception as e:
-        print(f"ERROR: Error during RAG email synthesis or parsing: {e}")
+        print(f"ERROR: Error during RAG email synthesis or parsing with Chat LLM: {e}")
         if "api key" in str(e).lower():
             print("ERROR HINT: Check your OpenAI API key validity and credits.")
         return None, None # Indicate failure
